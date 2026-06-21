@@ -9,8 +9,7 @@
 
 set -eo pipefail
 
-# Aid with debugging
-exec >/dev/console 2>&1 0<&-
+exec 0<&-
 trap "echo exit=\$?" EXIT
 for sig in HUP INT TERM; do trap "echo caught $sig" $sig; done
 set -x
@@ -60,7 +59,7 @@ prepare_bootstrap() {
 
 switchroot() {
     # Shutdown anything non-essential
-    systemctl isolate rescue.target
+    systemctl isolate rescue.target ||:
     for service in $(systemctl list-units --state=active --no-legend --plain | awk '{print $1}' | grep -E '(service|socket|timer)$' | grep -v make-it-arch); do
         systemctl stop -- $service ||:
     done
@@ -69,6 +68,7 @@ switchroot() {
         systemctl kill -- $service ||:
     done
     udevadm info --cleanup-db ||:
+    auditctl -D ||:
 
     # Unmount unhelpful filesystems
     for filesystem in $(cat /proc/mounts | grep -Ev ' /(run|dev|sys|proc)' | awk '{print $2}' | tac); do
@@ -171,7 +171,14 @@ final_installation() {
 
 PHASE="$1"
 if [[ "$PHASE" == "" ]]; then
-    systemd-run --unit=make-it-arch --scope --collect --property=IgnoreOnIsolate=yes -- bash "$0" pt1
+    systemd-run \
+        --unit=make-it-arch \
+        --collect \
+        --system \
+        --property=IgnoreOnIsolate=yes \
+        --property=StandardOutput=tty \
+        --property=StandardError=tty \
+        -- bash "$0" pt1
     sleep 86400
 elif [[ "$PHASE" == "pt1" ]]; then
     create_newroot
